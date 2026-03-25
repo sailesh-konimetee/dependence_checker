@@ -99,7 +99,8 @@ app.post('/api/explain', async (req, res) => {
 async function performScan(packageJson) {
   const startTime = Date.now();
 
-  const projectName = packageJson.name || 'Unknown Project';
+  let projectName = packageJson.name || 'Unknown Project';
+  projectName = projectName.replace(/-(frontend|backend)$/i, '');
   const dependencies = packageJson.dependencies || {};
   const devDependencies = packageJson.devDependencies || {};
 
