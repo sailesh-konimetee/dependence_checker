@@ -1,6 +1,6 @@
 /**
  * Trust Score Engine
- * Calculates a trust score (0-100) based on vulnerability and similarity analysis
+ * Calculates a trust score (0-100) based on strict percentage of clean packages
  */
 
 const SEVERITY_WEIGHTS = {
@@ -24,76 +24,86 @@ const SUSPICIOUS_WEIGHTS = {
  * @returns {Object} Trust score breakdown
  */
 function calculateTrustScore(vulnerabilityResults, similarityResults, sbom) {
-  let deductions = 0;
+  const totalPackages = sbom.totalComponents || 1;
   const breakdown = {
     vulnerabilityDeductions: 0,
     suspiciousDeductions: 0,
     details: [],
   };
 
-  // --- Vulnerability deductions ---
+  // 1. Calculate Trust Score: Ratio of (Total - Suspicious) / Total
+  const suspiciousSet = new Set();
+  for (const susp of similarityResults.suspicious) {
+    if (susp.package) suspiciousSet.add(susp.package);
+  }
+  const uniqueSuspiciousCount = suspiciousSet.size;
+  
+  let trustScore = Math.round(((totalPackages - uniqueSuspiciousCount) / totalPackages) * 100);
+  trustScore = Math.max(0, Math.min(100, trustScore));
+
+  // 2. Calculate Vulnerability Score: Ratio of (Total - Vulnerable) / Total
+  const vulnerableSet = new Set();
+  if (vulnerabilityResults.packages && vulnerabilityResults.packages.length > 0) {
+    vulnerabilityResults.packages.forEach(pkg => {
+      if (pkg.package) vulnerableSet.add(pkg.package);
+    });
+  }
+  const uniqueVulnerableCount = vulnerableSet.size;
+  
+  let vulnerabilityScore = Math.round(((totalPackages - uniqueVulnerableCount) / totalPackages) * 100);
+  vulnerabilityScore = Math.max(0, Math.min(100, vulnerabilityScore));
+
+  // --- Breakdown Details for UI ---
   const summary = vulnerabilityResults.summary;
-
-  const vulnDeduction =
-    summary.critical * SEVERITY_WEIGHTS.critical +
-    summary.high * SEVERITY_WEIGHTS.high +
-    summary.medium * SEVERITY_WEIGHTS.medium +
-    summary.low * SEVERITY_WEIGHTS.low +
-    summary.unknown * SEVERITY_WEIGHTS.unknown;
-
-  breakdown.vulnerabilityDeductions = vulnDeduction;
+  let globalVulnDeduction = 0;
 
   if (summary.critical > 0) {
-    breakdown.details.push({
-      type: 'CRITICAL_VULNS',
-      message: `${summary.critical} critical vulnerabilities found (-${summary.critical * SEVERITY_WEIGHTS.critical} points)`,
-      impact: summary.critical * SEVERITY_WEIGHTS.critical,
-    });
+    const d = summary.critical * SEVERITY_WEIGHTS.critical;
+    globalVulnDeduction += d;
+    breakdown.details.push({ type: 'CRITICAL_VULNS', message: `${summary.critical} critical vulnerabilities found`, impact: d });
   }
   if (summary.high > 0) {
-    breakdown.details.push({
-      type: 'HIGH_VULNS',
-      message: `${summary.high} high severity vulnerabilities found (-${summary.high * SEVERITY_WEIGHTS.high} points)`,
-      impact: summary.high * SEVERITY_WEIGHTS.high,
-    });
+    const d = summary.high * SEVERITY_WEIGHTS.high;
+    globalVulnDeduction += d;
+    breakdown.details.push({ type: 'HIGH_VULNS', message: `${summary.high} high severity vulnerabilities found`, impact: d });
   }
   if (summary.medium > 0) {
-    breakdown.details.push({
-      type: 'MEDIUM_VULNS',
-      message: `${summary.medium} medium severity vulnerabilities found (-${summary.medium * SEVERITY_WEIGHTS.medium} points)`,
-      impact: summary.medium * SEVERITY_WEIGHTS.medium,
-    });
+    const d = summary.medium * SEVERITY_WEIGHTS.medium;
+    globalVulnDeduction += d;
+    breakdown.details.push({ type: 'MEDIUM_VULNS', message: `${summary.medium} medium severity vulnerabilities found`, impact: d });
   }
   if (summary.low > 0) {
-    breakdown.details.push({
-      type: 'LOW_VULNS',
-      message: `${summary.low} low severity vulnerabilities found (-${summary.low * SEVERITY_WEIGHTS.low} points)`,
-      impact: summary.low * SEVERITY_WEIGHTS.low,
-    });
+    const d = summary.low * SEVERITY_WEIGHTS.low;
+    globalVulnDeduction += d;
+    breakdown.details.push({ type: 'LOW_VULNS', message: `${summary.low} low severity vulnerabilities found`, impact: d });
   }
 
-  deductions += vulnDeduction;
-
-  // --- Suspicious package deductions ---
-  let suspDeduction = 0;
+  let globalSuspDeduction = 0;
   for (const susp of similarityResults.suspicious) {
-    const weight = SUSPICIOUS_WEIGHTS[susp.riskLevel] || 10;
-    suspDeduction += weight;
+    let weight = susp.riskScore || SUSPICIOUS_WEIGHTS[susp.riskLevel] || 10;
+    let isInformational = false;
+
+    if (susp.reason && susp.reason.includes('Static Analysis')) {
+      if (weight < 50) {
+        weight = 0;
+        isInformational = true;
+      } else {
+        weight = Math.min(30, weight);
+      }
+    }
+    
+    globalSuspDeduction += weight;
     breakdown.details.push({
-      type: 'SUSPICIOUS_PKG',
-      message: `Suspicious package "${susp.package}" (${susp.riskLevel} risk) - ${susp.reason} (-${weight} points)`,
+      type: isInformational ? 'INFORMATIONAL_STATIC' : 'STATIC_OR_SUSPICIOUS_PKG',
+      message: `Integrity Issue "${susp.package}" (${isInformational ? 'INFO' : susp.riskLevel} risk) - ${susp.reason}`,
       impact: weight,
     });
   }
-  breakdown.suspiciousDeductions = suspDeduction;
-  deductions += suspDeduction;
 
-  // --- Calculate final score ---
-  const trustScoreRaw = Math.max(0, 100 - suspDeduction);
-  const trustScore = Math.round(trustScoreRaw);
+  breakdown.vulnerabilityDeductions = globalVulnDeduction;
+  breakdown.suspiciousDeductions = globalSuspDeduction;
 
-  const vulnScoreRaw = Math.max(0, 100 - vulnDeduction);
-  const vulnerabilityScore = Math.round(vulnScoreRaw);
+  const totalDeductions = globalVulnDeduction + globalSuspDeduction;
 
   // Determine OVERALL risk level based on the worst of the two scores
   const overallScore = Math.min(trustScore, vulnerabilityScore);
@@ -111,23 +121,23 @@ function calculateTrustScore(vulnerabilityResults, similarityResults, sbom) {
   }
 
   return {
-    score: trustScore, // Now ONLY reflects authenticity/typosquatting
-    vulnerabilityScore, // NEW: Only reflects CVE severities
-    overallScore, // For backward compatibility coloring
+    score: trustScore,
+    vulnerabilityScore,
+    overallScore,
     maxScore: 100,
     riskLevel,
     color,
-    totalDeductions: deductions,
+    totalDeductions,
     breakdown,
     summary: {
-      totalDependencies: sbom.totalComponents || 0,
+      totalDependencies: totalPackages,
       directDependencies: sbom.directDependencies || 0,
       totalVulnerabilities: summary.total,
       criticalVulnerabilities: summary.critical,
       highVulnerabilities: summary.high,
       mediumVulnerabilities: summary.medium,
       lowVulnerabilities: summary.low,
-      suspiciousPackages: similarityResults.suspiciousCount,
+      suspiciousPackages: uniqueSuspiciousCount,
     },
     recommendation: getRecommendation(overallScore, summary, similarityResults),
   };

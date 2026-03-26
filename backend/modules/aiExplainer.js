@@ -79,4 +79,70 @@ Answer in NO MORE than 150 words.`;
   }
 }
 
-module.exports = { getExplanation };
+async function getReportExplanation(trustScore, riskLevel, issues) {
+  let systemPrompt = `You are a cybersecurity assistant.`;
+  
+  let userPrompt = `Analyze the given dependency risk report and explain it in simple, clear language for a developer.
+
+Input:
+- Trust Score: ${trustScore}
+- Risk Level: ${riskLevel}
+- Issues:
+${issues}
+
+Instructions:
+1. Explain why the project is safe or risky.
+2. Mention the most important issues (e.g., suspicious package names, unknown packages, vulnerabilities).
+3. Keep the explanation short (2–3 sentences).
+4. Avoid technical jargon.
+5. Give 1 simple recommendation to improve security.
+
+Output format:
+- Summary:
+- Reason:
+- Recommendation:`;
+
+  try {
+    const response = await fetch(`${HUGGINGFACE_SPACE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL, 
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        stream: false
+      }),
+      timeout: 60000
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI Model Endpoint responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    let explanationText = "Unable to parse AI response";
+    if (data && data.message && data.message.content) {
+      explanationText = data.message.content;
+    } else if (data && data.response) {
+      explanationText = data.response;
+    }
+
+    return {
+      success: true,
+      explanation: explanationText
+    };
+
+  } catch (error) {
+    console.error("AI Report Explanation Error:", error.message);
+    return {
+      success: false,
+      message: "AI_GENERATION_FAILED",
+      explanation: `Failed to generate explanation. Error: ${error.message}`
+    };
+  }
+}
+
+module.exports = { getExplanation, getReportExplanation };

@@ -6,10 +6,11 @@ const fs = require('fs');
 
 const { generateSBOM } = require('./modules/sbomGenerator');
 const { scanAllPackages } = require('./modules/vulnerabilityScanner');
-const { detectSuspiciousPackages } = require('./modules/similarityDetector');
+const { detectSuspiciousPackages, POPULAR_PACKAGES } = require('./modules/similarityDetector');
+const { performStaticAnalysis } = require('./modules/staticAnalyzer');
 const { calculateTrustScore } = require('./modules/trustScoreEngine');
 const { generateReport, saveToHistory, getHistory } = require('./modules/reportGenerator');
-const { getExplanation } = require('./modules/aiExplainer');
+const { getExplanation, getReportExplanation } = require('./modules/aiExplainer');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -95,6 +96,24 @@ app.post('/api/explain', async (req, res) => {
   }
 });
 
+// AI Report Explanation Endpoint
+app.post('/api/explain-report', async (req, res) => {
+  try {
+    const { trustScore, riskLevel, issues } = req.body;
+    
+    const explanationResult = await getReportExplanation(trustScore, riskLevel, issues);
+    
+    if (!explanationResult.success) {
+      return res.status(503).json(explanationResult);
+    }
+    
+    res.json(explanationResult);
+  } catch (err) {
+    console.error('AI Report Explanation error:', err);
+    res.status(500).json({ error: 'Failed to generate explanation' });
+  }
+});
+
 // Core scan function
 async function performScan(packageJson) {
   const startTime = Date.now();
@@ -143,6 +162,34 @@ async function performScan(packageJson) {
   }
 
   console.log(`   Found ${similarityResults.suspiciousCount} suspicious packages`);
+
+  // Step 3.5: Static Code Analysis
+  console.log('📖 Performing Static Code Analysis...');
+  const staticAnalysis = await performStaticAnalysis(sbom.components);
+  
+  const alreadySuspiciousPackages = new Set(similarityResults.suspicious.map(s => s.package));
+  
+  for (const finding of staticAnalysis.findings) {
+    // Only flag behavioral issues if the package is ALREADY flagged for typosquatting/fake
+    if (!alreadySuspiciousPackages.has(finding.package)) {
+      continue;
+    }
+
+    // Embed the static analysis findings INTO the existing similarity alert
+    const existingEntry = similarityResults.suspicious.find(s => s.package === finding.package);
+    if (existingEntry) {
+      existingEntry.patterns.push(...finding.flags.map(f => ({ type: f.type, detail: f.description })));
+      existingEntry.reason += ` | Behavior Alert: ${finding.flags.map(f => f.type).join(', ')}.`;
+      existingEntry.riskScore = Math.max(existingEntry.riskScore || 0, finding.riskScore);
+      
+      if (finding.riskScore >= 50 && existingEntry.riskLevel !== 'HIGH') {
+        existingEntry.riskLevel = 'HIGH';
+        similarityResults.highRisk++;
+        similarityResults.mediumRisk = Math.max(0, similarityResults.mediumRisk - 1);
+      }
+    }
+  }
+  console.log(`   Processed static analysis on similarity flagged packages.`);
 
   // Step 4: Calculate trust score
   console.log('📊 Calculating trust score...');

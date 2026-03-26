@@ -7,7 +7,8 @@ import VulnerabilityTable from './VulnerabilityTable';
 import SuspiciousPackages from './SuspiciousPackages';
 import SBOMView from './SBOMView';
 import ReportDownload from './ReportDownload';
-import { HiChartBar, HiShieldExclamation, HiExclamationTriangle, HiDocumentText, HiArrowDownTray, HiArrowPath } from 'react-icons/hi2';
+import AIReportExplanation from './AIReportExplanation';
+import { HiChartBar, HiShieldExclamation, HiExclamationTriangle, HiDocumentText, HiArrowDownTray, HiArrowPath, HiSparkles } from 'react-icons/hi2';
 
 export default function Dashboard({ data, onNewScan }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -16,6 +17,7 @@ export default function Dashboard({ data, onNewScan }) {
     { id: 'overview', label: 'Overview', icon: <HiChartBar className="w-4 h-4" /> },
     { id: 'vulnerabilities', label: 'Vulnerabilities', icon: <HiShieldExclamation className="w-4 h-4" /> },
     { id: 'suspicious', label: 'Suspicious', icon: <HiExclamationTriangle className="w-4 h-4" /> },
+    { id: 'ai-analysis', label: 'AI Analysis', icon: <HiSparkles className="w-4 h-4" /> },
     { id: 'sbom', label: 'SBOM', icon: <HiDocumentText className="w-4 h-4" /> },
     { id: 'report', label: 'Report', icon: <HiArrowDownTray className="w-4 h-4" /> },
   ];
@@ -75,7 +77,11 @@ export default function Dashboard({ data, onNewScan }) {
           {/* Trust Score + Stats */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
-              <TrustScoreMeter trustScore={data.trustScore} />
+              <TrustScoreMeter 
+                trustScore={data.trustScore} 
+                sbom={data.sbom} 
+                similarityResults={data.similarityResults} 
+              />
             </div>
             <div className="lg:col-span-2">
               <StatsCards data={data} />
@@ -111,6 +117,10 @@ export default function Dashboard({ data, onNewScan }) {
 
       {activeTab === 'suspicious' && (
         <SuspiciousPackages results={data.similarityResults} />
+      )}
+
+      {activeTab === 'ai-analysis' && (
+        <AIReportExplanation data={data} />
       )}
 
       {activeTab === 'sbom' && (

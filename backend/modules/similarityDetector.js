@@ -192,4 +192,4 @@ function detectSuspiciousPackages(packageNames) {
   };
 }
 
-module.exports = { detectSuspiciousPackages, levenshteinDistance, similarityRatio };
+module.exports = { detectSuspiciousPackages, levenshteinDistance, similarityRatio, POPULAR_PACKAGES };
