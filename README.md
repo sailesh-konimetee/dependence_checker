@@ -1,4 +1,4 @@
-# Secure Software Supply Chain Analyzer
+# Secure Software Supply Chain Analyzer(Dependency Checker)
 
 A powerful, full-stack application built for security analysis of npm dependencies. Detect vulnerabilities using OSV.dev, identify typosquatting attacks using Levenshtein distance, and generate actionable Trust Scores!
 
